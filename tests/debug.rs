@@ -1,5 +1,5 @@
 use indoc::indoc;
-use serde_json::{json, Number, Value};
+use serde_json_1400::{json, Number, Value};
 
 #[test]
 fn number() {
@@ -48,7 +48,7 @@ fn value_object() {
 
 #[test]
 fn error() {
-    let err = serde_json::from_str::<Value>("{0}").unwrap_err();
+    let err = serde_json_1400::from_str::<Value>("{0}").unwrap_err();
     let expected = "Error(\"key must be a string\", line: 1, column: 2)";
     assert_eq!(format!("{:?}", err), expected);
 }

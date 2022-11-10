@@ -1,7 +1,7 @@
 #![cfg(not(feature = "preserve_order"))]
 #![allow(clippy::assertions_on_result_states)]
 
-use serde_json::{json, Deserializer, Value};
+use serde_json_1400::{json, Deserializer, Value};
 
 // Rustfmt issue https://github.com/rust-lang-nursery/rustfmt/issues/2740
 #[rustfmt::skip]

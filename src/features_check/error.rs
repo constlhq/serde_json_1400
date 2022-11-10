@@ -1,1 +1,1 @@
-"serde_json requires that either `std` (default) or `alloc` feature is enabled"
+"serde_json_1400 requires that either `std` (default) or `alloc` feature is enabled"
