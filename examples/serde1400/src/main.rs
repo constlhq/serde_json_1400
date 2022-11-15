@@ -1,138 +1,175 @@
-use serde_json_1400::json;
+use std::any::Any;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Face {
-    pub nose: String,
-    pub age: i32,
+    pub nose: Option<String>,
+    pub eye: Option<i32>,
 }
 
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Person {
-    pub face:Face,
+    pub face: Vec<Face>,
     pub name: String,
 }
-
-
 
 
 use serde::ser::{self, Serializer, SerializeStruct, SerializeTupleStruct, Impossible};
 use std::fmt::{self, Display};
 
-fn type_name<T: Serialize>(t: &T) -> &'static str {
-    #[derive(Debug)]
-    struct NotStruct;
-    type Result<T> = std::result::Result<T, NotStruct>;
-    impl std::error::Error for NotStruct {
-        fn description(&self) -> &str { "not struct" }
+fn type_of<T>(_: &T) -> String {
+    let type_name = std::any::type_name::<T>();
+    let mut short_name = String::new();
+
+    // A typename may be a composition of several other type names (e.g. generic parameters)
+    // separated by the characters that we try to find below.
+    // Then, each individual typename is shortened to its last path component.
+    // Note: Instead of `find`, `split_inclusive` would be nice but it's still unstable...
+    let mut remainder = type_name;
+    while let Some(index) = remainder.find(&['<', '>', '(', ')', '[', ']', ',', ';'][..]) {
+        let (path, new_remainder) = remainder.split_at(index);
+        // Push the shortened path in front of the found character
+        short_name.push_str(path.rsplit(':').next().unwrap());
+        // Push the character that was found
+        let character = new_remainder.chars().next().unwrap();
+        short_name.push(character);
+        // Advance the remainder
+        if character == ',' || character == ';' {
+            // A comma or semicolon is always followed by a space
+            short_name.push(' ');
+            remainder = &new_remainder[2..];
+        } else {
+            remainder = &new_remainder[1..];
+        }
     }
-    impl Display for NotStruct {
-        fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result { unimplemented!() }
-    }
-    impl ser::Error for NotStruct {
-        fn custom<T: Display>(_msg: T) -> Self { NotStruct }
+    // The remainder will only be non-empty if there were no matches at all
+    if !remainder.is_empty() {
+        // Then, the full typename is a path that has to be shortened
+        short_name.push_str(remainder.rsplit(':').next().unwrap());
     }
 
-    struct TypeName;
-    impl Serializer for TypeName {
-        type Ok = &'static str;
-        type Error = NotStruct;
-        type SerializeSeq = Impossible<Self::Ok, Self::Error>;
-        type SerializeTuple = Impossible<Self::Ok, Self::Error>;
-        type SerializeTupleStruct = Struct;
-        type SerializeTupleVariant = Impossible<Self::Ok, Self::Error>;
-        type SerializeMap = Impossible<Self::Ok, Self::Error>;
-        type SerializeStruct = Struct;
-        type SerializeStructVariant = Impossible<Self::Ok, Self::Error>;
-        fn serialize_bool(self, _v: bool) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_i8(self, _v: i8) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_i16(self, _v: i16) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_i32(self, _v: i32) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_i64(self, _v: i64) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_u8(self, _v: u8) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_u16(self, _v: u16) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_u32(self, _v: u32) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_u64(self, _v: u64) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_f32(self, _v: f32) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_f64(self, _v: f64) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_char(self, _v: char) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_str(self, _v: &str) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_bytes(self, _v: &[u8]) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_none(self) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_some<T: ?Sized + Serialize>(self, _value: &T) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_unit(self) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok> {
-            Ok(name)
-        }
-        fn serialize_unit_variant(self, _name: &'static str, _variant_index: u32, _variant: &'static str) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_newtype_struct<T: ?Sized + Serialize>(self, name: &'static str, _value: &T) -> Result<Self::Ok> {
-            Ok(name)
-        }
-        fn serialize_newtype_variant<T: ?Sized + Serialize>(self, _name: &'static str, _variant_index: u32, _variant: &'static str, _value: &T) -> Result<Self::Ok> { Err(NotStruct) }
-        fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq> { Err(NotStruct) }
-        fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple> { Err(NotStruct) }
-        fn serialize_tuple_struct(self, name: &'static str, _len: usize) -> Result<Self::SerializeTupleStruct> {
-            Ok(Struct(name))
-        }
-        fn serialize_tuple_variant(self, _name: &'static str, _variant_index: u32, _variant: &'static str, _len: usize) -> Result<Self::SerializeTupleVariant> { Err(NotStruct) }
-        fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> { Err(NotStruct) }
-        fn serialize_struct(self, name: &'static str, _len: usize) -> Result<Self::SerializeStruct> {
-            Ok(Struct(name))
-        }
-        fn serialize_struct_variant(self, _name: &'static str, _variant_index: u32, _variant: &'static str, _len: usize) -> Result<Self::SerializeStructVariant> { Err(NotStruct) }
-    }
-
-    struct Struct(&'static str);
-    impl SerializeStruct for Struct {
-        type Ok = &'static str;
-        type Error = NotStruct;
-        fn serialize_field<T: ?Sized + Serialize>(&mut self, _key: &'static str, _value: &T) -> Result<()> { Ok(()) }
-        fn end(self) -> Result<Self::Ok> {
-            Ok(self.0)
-        }
-    }
-    impl SerializeTupleStruct for Struct {
-        type Ok = &'static str;
-        type Error = NotStruct;
-        fn serialize_field<T: ?Sized + Serialize>(&mut self, _value: &T) -> Result<()> { Ok(()) }
-        fn end(self) -> Result<Self::Ok> {
-            Ok(self.0)
-        }
-    }
-
-    t.serialize(TypeName).unwrap()
+    short_name
 }
+
 
 #[derive(Serialize)]
 struct Vec2(f32, f32);
 
 
-
 fn main() {
-
-
-
     let face = Face {
-        nose: "刘亦菲".to_string(),
-        age: 32,
+        nose: Some("big face".to_string()),
+        eye: Some(2),
+    };
+
+    let aa = 32;
+    // println!("{}", type_of(&face));
+    // let person :Person =  serde_json_1400::from_str("{\"PersonObject\":{\"face\":\{\"FaceObject\":{\"nose\":\"small\",\"eye\":2}},\"name\":\"lyf\"}}").unwrap();
+    // println!("{:?}",person)
+
+    //
+    let face_list = vec![Face {
+        nose: Some("big".to_string()),
+        eye: Some(2),
+    }, Face {
+        nose: Some("big".to_string()),
+        eye: Some(2),
+    }, Face {
+        nose: Some("big".to_string()),
+        eye: Some(2),
+    }];
+
+
+    //
+    let face_list2 = vec![Face {
+        nose: Some("big".to_string()),
+        eye: Some(2),
+    }, Face {
+        nose: Some("big".to_string()),
+        eye: Some(2),
+    }, Face {
+        nose: Some("big".to_string()),
+        eye: Some(2),
+    }];
+
+    let person = Person {
+        face: face_list,
+        name: "lyf".to_string(),
     };
 
 
-    let person = Person{
-        face: face,
-        name: "lyf".to_string()
+    let person2 = Person {
+        face: face_list2,
+        name: "ym".to_string(),
     };
+
     // serde_json_1400::to_string(&face);
 
-    let xx = vec![1,2];
-    // println!("{}", type_name(&vec![1,2]));
-    println!("{}", serde_json_1400::to_string_pretty(&person).unwrap());
+    println!("{}", serde_json_1400::to_string(&Face {
+        nose: Some("xx".to_string()),
+        eye: Some(1),
+    }).unwrap());
 
-    let person :Person =  serde_json_1400::from_str("{\"PersonObject\":{\"face\":\
-                        {\"FaceObject\":{\"nose\":\"刘亦菲\",\"age\":32}},\"name\":\"lyf\"}}").unwrap();
-
-    println!("{:?}",person)
+    let face: Face = serde_json_1400::from_str("{\"FaceObject\":{\"nose\":\"xx\",\"eye\":1}}").unwrap();
 
 
+    println!("{}", serde_json_1400::to_string(&vec![person, person2]).unwrap());
+
+    // println!("{}", serde_json_1400::to_string(&person).unwrap());
+
+    // println!("{}", type_of(&face_list));
+    // face_list.type_id();
+
+    // println!("{}", serde_json_1400::to_string(&face_list2).unwrap());
+
+    // let face:Face = serde_json_1400::from_str("{\"FaceObject\":{\"nose\":\"big face\",\"eye\":2}}").unwrap();
+
+    // let faces:Vec<Face> = serde_json_1400::from_str("[{\"nose\":\"big\",\"eye\":2},{\"nose\":\"small\",\"eye\":2},{\"nose\":\"small\",\"eye\":2}]").unwrap();
+    // let faces: Vec<Face> = serde_json_1400::from_str("{\"FaceListObject\":{\"FaceObject\":[{\"nose\":\"big\",\"eye\":2},{\"nose\":\"small\",\"eye\":2},{\"nose\":\"small\"}]}}").unwrap();
+
+    let person: Vec<Person> = serde_json_1400::from_str("{
+    \"PersonListObject\": {
+        \"PersonObject\": [
+            {
+                \"face\": {
+                    \"FaceObject\": [
+                        {
+                            \"nose\": \"big\",
+                            \"eye\": 2
+                        },
+                        {
+                            \"nose\": \"big\",
+                            \"eye\": 2
+                        },
+                        {
+                            \"nose\": \"big\",
+                            \"eye\": 2
+                        }
+                    ]
+                },
+                \"name\": \"lyf\"
+            },
+            {
+                \"face\": {
+                    \"FaceObject\": [
+                        {
+                            \"nose\": \"big\",
+                            \"eye\": 2
+                        },
+                        {
+                            \"nose\": \"big\",
+                            \"eye\": 2
+                        },
+                        {
+                            \"nose\": \"big\",
+                            \"eye\": 2
+                        }
+                    ]
+                },
+                \"name\": \"ym\"
+            }
+        ]
+    }
+}").unwrap();
 }

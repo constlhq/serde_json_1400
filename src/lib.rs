@@ -367,6 +367,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 extern crate alloc;
+extern crate core;
 
 #[cfg(feature = "std")]
 #[doc(inline)]

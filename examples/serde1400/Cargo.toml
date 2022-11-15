@@ -7,4 +7,6 @@ edition = "2021"
 
 [dependencies]
 serde_json_1400 = { version = "1.0.87", path = "../../" }
+serde_json = { version = "1.0.87"}
 serde = { version = "1.0", features = ["derive"] }
+pretty-type-name = "1.0.0"

@@ -6,13 +6,50 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::{self, Display};
 use core::num::FpCategory;
+use std::io::Write;
 use serde::ser::{self, Impossible, Serialize};
+
+/// asdf
+pub fn type_of<T: ?Sized>(_: &T) -> String {
+    let type_name = std::any::type_name::<T>();
+    let mut short_name = String::new();
+
+    // A typename may be a composition of several other type names (e.g. generic parameters)
+    // separated by the characters that we try to find below.
+    // Then, each individual typename is shortened to its last path component.
+    // Note: Instead of `find`, `split_inclusive` would be nice but it's still unstable...
+    let mut remainder = type_name;
+    while let Some(index) = remainder.find(&['<', '>', '(', ')', '[', ']', ',', ';'][..]) {
+        let (path, new_remainder) = remainder.split_at(index);
+        // Push the shortened path in front of the found character
+        short_name.push_str(path.rsplit(':').next().unwrap());
+        // Push the character that was found
+        let character = new_remainder.chars().next().unwrap();
+        short_name.push(character);
+        // Advance the remainder
+        if character == ',' || character == ';' {
+            // A comma or semicolon is always followed by a space
+            short_name.push(' ');
+            remainder = &new_remainder[2..];
+        } else {
+            remainder = &new_remainder[1..];
+        }
+    }
+    // The remainder will only be non-empty if there were no matches at all
+    if !remainder.is_empty() {
+        // Then, the full typename is a path that has to be shortened
+        short_name.push_str(remainder.rsplit(':').next().unwrap());
+    }
+
+    short_name
+}
 
 /// A structure for serializing Rust values into JSON.
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub struct Serializer<W, F = CompactFormatter> {
     writer: W,
     formatter: F,
+    list_wrapper: u8,
 }
 
 impl<W> Serializer<W>
@@ -26,17 +63,6 @@ impl<W> Serializer<W>
     }
 }
 
-impl<'a, W> Serializer<W, PrettyFormatter<'a>>
-    where
-        W: io::Write,
-{
-    /// Creates a new JSON pretty print serializer.
-    #[inline]
-    pub fn pretty(writer: W) -> Self {
-        Serializer::with_formatter(writer, PrettyFormatter::new())
-    }
-}
-
 impl<W, F> Serializer<W, F>
     where
         W: io::Write,
@@ -46,7 +72,7 @@ impl<W, F> Serializer<W, F>
     /// specified.
     #[inline]
     pub fn with_formatter(writer: W, formatter: F) -> Self {
-        Serializer { writer, formatter }
+        Serializer { writer, formatter, list_wrapper: 0 }
     }
 
     /// Unwrap the `Writer` from the `Serializer`.
@@ -283,12 +309,15 @@ impl<'a, W, F> ser::Serializer for &'a mut Serializer<W, F>
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
         tri!(self
             .formatter
-            .begin_array(&mut self.writer)
+            .begin_object(&mut self.writer)
             .map_err(Error::io));
+
+        self.list_wrapper += 1;
+
         if len == Some(0) {
             tri!(self
                 .formatter
-                .end_array(&mut self.writer)
+                .end_object(&mut self.writer)
                 .map_err(Error::io));
             Ok(Compound::Map {
                 ser: self,
@@ -375,22 +404,48 @@ impl<'a, W, F> ser::Serializer for &'a mut Serializer<W, F>
             #[cfg(feature = "raw_value")]
             crate::raw::TOKEN => Ok(Compound::RawValue { ser: self }),
             _ => {
-                tri!(self
-            .formatter
-            .begin_object(&mut self.writer)
-            .map_err(Error::io));
-                tri!(self
-            .formatter
-            .begin_object_key(&mut self.writer, true)
-            .map_err(Error::io));
-                tri!(self.serialize_str(&[name, "Object"].join("")));
-                tri!(self.formatter.end_object_key(&mut self.writer).map_err(Error::io));
-                tri!(self.formatter.begin_object_value(&mut self.writer).map_err(Error::io));
-                tri!(self.formatter.begin_object(&mut self.writer).map_err(Error::io));
-                Ok(Compound::Map {
-                    ser: self,
-                    state: State::First,
-                })
+                if self.list_wrapper == 0 {
+                    // not in list ,should wrapObject
+                    tri!(self
+                    .formatter
+                    .begin_object(&mut self.writer)
+                    .map_err(Error::io));
+
+                    tri!(self
+                    .formatter
+                    .begin_object_key(&mut self.writer, true)
+                    .map_err(Error::io));
+
+                    tri!(self.serialize_str(&[name, "Object"].join("")));
+                    tri!(self.formatter.end_object_key(&mut self.writer).map_err(Error::io));
+                    tri!(self.formatter.begin_object_value(&mut self.writer).map_err(Error::io));
+                    tri!(self.formatter.begin_object(&mut self.writer).map_err(Error::io));
+                    Ok(Compound::Map {
+                        ser: self,
+                        state: State::First,
+                    })
+                } else {
+                    // in list
+                    tri!(self
+                    .formatter
+                    .begin_object(&mut self.writer)
+                    .map_err(Error::io));
+                    if len == 0 {
+                        tri!(self
+                        .formatter
+                        .end_object(&mut self.writer)
+                        .map_err(Error::io));
+                        Ok(Compound::Map {
+                            ser: self,
+                            state: State::Empty,
+                        })
+                    } else {
+                        Ok(Compound::Map {
+                            ser: self,
+                            state: State::First,
+                        })
+                    }
+                }
             }
         }
     }
@@ -482,6 +537,7 @@ pub enum State {
     Empty,
     First,
     Rest,
+    None,
 }
 
 // Not public API. Should be pub(crate).
@@ -510,18 +566,23 @@ impl<'a, W, F> ser::SerializeSeq for Compound<'a, W, F>
         where
             T: ?Sized + Serialize,
     {
+
         match self {
             Compound::Map { ser, state } => {
                 tri!(ser
                     .formatter
-                    .begin_array_value(&mut ser.writer, *state == State::First)
+                    .begin_array_value_1400(&mut ser.writer, *state == State::First,value)
                     .map_err(Error::io));
                 *state = State::Rest;
                 tri!(value.serialize(&mut **ser));
+                // let j = to_string(value).unwrap();
+                //
+                // ser.writer.write(j.as_bytes());
                 ser.formatter
                     .end_array_value(&mut ser.writer)
                     .map_err(Error::io)
             }
+
             #[cfg(feature = "arbitrary_precision")]
             Compound::Number { .. } => unreachable!(),
             #[cfg(feature = "raw_value")]
@@ -534,7 +595,11 @@ impl<'a, W, F> ser::SerializeSeq for Compound<'a, W, F>
         match self {
             Compound::Map { ser, state } => match state {
                 State::Empty => Ok(()),
-                _ => ser.formatter.end_array(&mut ser.writer).map_err(Error::io),
+                _ => {
+                    ser.writer.write(b"]}");
+                    Ok(())
+                    // ser.formatter.end_array(&mut ser.writer).map_err(Error::io)
+                }
             },
             #[cfg(feature = "arbitrary_precision")]
             Compound::Number { .. } => unreachable!(),
@@ -735,12 +800,12 @@ impl<'a, W, F> ser::SerializeStruct for Compound<'a, W, F>
     #[inline]
     fn end(self) -> Result<()> {
         match self {
-            Compound::Map { ser ,..} => {
-
-            ser.formatter.end_object(&mut ser.writer);
-            ser.formatter.end_object(&mut ser.writer);
+            Compound::Map { ser, .. } => {
+                if ser.list_wrapper == 0 {
+                    ser.formatter.end_object(&mut ser.writer);
+                }
+                ser.formatter.end_object(&mut ser.writer);
                 Ok(())
-
             }
             #[cfg(feature = "arbitrary_precision")]
             Compound::Number { .. } => Ok(()),
@@ -1791,6 +1856,23 @@ pub trait Formatter {
         }
     }
 
+    /// Called before every array value.  Writes a `,` if needed to
+    /// the specified writer.
+    #[inline]
+    fn begin_array_value_1400<W, T>(&mut self, writer: &mut W, first: bool, value: &T) -> io::Result<()>
+        where
+            W: ?Sized + io::Write,
+            T: ?Sized + Serialize
+    {
+        if first {
+            let prefix = format!("\"{}\":[", type_of(value) + "Object");
+            writer.write(prefix.as_bytes());
+            Ok(())
+        } else {
+            writer.write_all(b",")
+        }
+    }
+
     /// Called after every array value.
     #[inline]
     fn end_array_value<W>(&mut self, _writer: &mut W) -> io::Result<()>
@@ -1880,132 +1962,6 @@ pub trait Formatter {
 pub struct CompactFormatter;
 
 impl Formatter for CompactFormatter {}
-
-/// This structure pretty prints a JSON value to make it human readable.
-#[derive(Clone, Debug)]
-pub struct PrettyFormatter<'a> {
-    current_indent: usize,
-    has_value: bool,
-    indent: &'a [u8],
-}
-
-impl<'a> PrettyFormatter<'a> {
-    /// Construct a pretty printer formatter that defaults to using two spaces for indentation.
-    pub fn new() -> Self {
-        PrettyFormatter::with_indent(b"  ")
-    }
-
-    /// Construct a pretty printer formatter that uses the `indent` string for indentation.
-    pub fn with_indent(indent: &'a [u8]) -> Self {
-        PrettyFormatter {
-            current_indent: 0,
-            has_value: false,
-            indent,
-        }
-    }
-}
-
-impl<'a> Default for PrettyFormatter<'a> {
-    fn default() -> Self {
-        PrettyFormatter::new()
-    }
-}
-
-impl<'a> Formatter for PrettyFormatter<'a> {
-    #[inline]
-    fn begin_array<W>(&mut self, writer: &mut W) -> io::Result<()>
-        where
-            W: ?Sized + io::Write,
-    {
-        self.current_indent += 1;
-        self.has_value = false;
-        writer.write_all(b"[")
-    }
-
-    #[inline]
-    fn end_array<W>(&mut self, writer: &mut W) -> io::Result<()>
-        where
-            W: ?Sized + io::Write,
-    {
-        self.current_indent -= 1;
-
-        if self.has_value {
-            tri!(writer.write_all(b"\n"));
-            tri!(indent(writer, self.current_indent, self.indent));
-        }
-
-        writer.write_all(b"]")
-    }
-
-    #[inline]
-    fn begin_array_value<W>(&mut self, writer: &mut W, first: bool) -> io::Result<()>
-        where
-            W: ?Sized + io::Write,
-    {
-        tri!(writer.write_all(if first { b"\n" } else { b",\n" }));
-        indent(writer, self.current_indent, self.indent)
-    }
-
-    #[inline]
-    fn end_array_value<W>(&mut self, _writer: &mut W) -> io::Result<()>
-        where
-            W: ?Sized + io::Write,
-    {
-        self.has_value = true;
-        Ok(())
-    }
-
-    #[inline]
-    fn begin_object<W>(&mut self, writer: &mut W) -> io::Result<()>
-        where
-            W: ?Sized + io::Write,
-    {
-        self.current_indent += 1;
-        self.has_value = false;
-        writer.write_all(b"{")
-    }
-
-    #[inline]
-    fn end_object<W>(&mut self, writer: &mut W) -> io::Result<()>
-        where
-            W: ?Sized + io::Write,
-    {
-        self.current_indent -= 1;
-
-        if self.has_value {
-            tri!(writer.write_all(b"\n"));
-            tri!(indent(writer, self.current_indent, self.indent));
-        }
-
-        writer.write_all(b"}")
-    }
-
-    #[inline]
-    fn begin_object_key<W>(&mut self, writer: &mut W, first: bool) -> io::Result<()>
-        where
-            W: ?Sized + io::Write,
-    {
-        tri!(writer.write_all(if first { b"\n" } else { b",\n" }));
-        indent(writer, self.current_indent, self.indent)
-    }
-
-    #[inline]
-    fn begin_object_value<W>(&mut self, writer: &mut W) -> io::Result<()>
-        where
-            W: ?Sized + io::Write,
-    {
-        writer.write_all(b": ")
-    }
-
-    #[inline]
-    fn end_object_value<W>(&mut self, _writer: &mut W) -> io::Result<()>
-        where
-            W: ?Sized + io::Write,
-    {
-        self.has_value = true;
-        Ok(())
-    }
-}
 
 fn format_escaped_str<W, F>(writer: &mut W, formatter: &mut F, value: &str) -> io::Result<()>
     where
@@ -2124,7 +2080,7 @@ pub fn to_writer_pretty<W, T>(writer: W, value: &T) -> Result<()>
         W: io::Write,
         T: ?Sized + Serialize,
 {
-    let mut ser = Serializer::pretty(writer);
+    let mut ser = Serializer::new(writer);
     value.serialize(&mut ser)
 }
 
@@ -2171,12 +2127,23 @@ pub fn to_string<T>(value: &T) -> Result<String>
     where
         T: ?Sized + Serialize,
 {
-    let vec = tri!(to_vec(value));
-    let string = unsafe {
-        // We do not emit invalid UTF-8.
-        String::from_utf8_unchecked(vec)
-    };
-    Ok(string)
+    let type_name = type_of(value);
+    if type_name.starts_with("Vec") {
+        let inner_type_name = type_name.replace("Vec<", "").replace(">", "");
+        let vec = tri!(to_vec(value));
+        let string = unsafe {
+            // We do not emit invalid UTF-8.
+            String::from_utf8_unchecked(vec)
+        };
+        Ok(format!("{{\"{}ListObject\":{}}}", inner_type_name, string))
+    } else {
+        let vec = tri!(to_vec(value));
+        let string = unsafe {
+            // We do not emit invalid UTF-8.
+            String::from_utf8_unchecked(vec)
+        };
+        Ok(string)
+    }
 }
 
 /// Serialize the given data structure as a pretty-printed String of JSON.
